@@ -2,26 +2,25 @@
 # -*- coding: utf-8 -*-
 """
 ================================================================================
-validacion_3.py - PROFESSIONAL VALIDATION MEPPME v15.0 (Appendix C)
+validacion_3.py - PROFESSIONAL VALIDATION MEPPME v16.0 (Appendix C)
 ================================================================================
-VERSION: 15.0 (Complete, with tortuosity, fine mesh and non-linear adjustment)
+VERSION: 16.0 (Major graphical and reporting improvements)
 AUTHOR:  José Luis Abrego Salazar
 COMPANY: ABNALITIC
 YEAR:    2026
 LICENSE: MIT
 
-MAIN IMPROVEMENTS v15.0:
-    1. Tortuosity factor (TORTUOSITY_FACTOR) applied to alpha (Appendix A, Sec. A.4.1.2).
-       This reduces lambda2 saturation and allows inferring effective tortuosity.
-    2. Lambda2 bounds extended to ±100,000 (LAMBDA_BOUNDS) to cover very low
-       permeability soils without numerical saturation.
-    3. Integration mesh increased to 512 points to improve conditioning.
-    4. Phase diagram (Part 1): linear fit replaced by an exponential fit
-       (E[s] = A·exp(-B·gamma) + C), capturing the "L" shape that validates
-       equation (A.2.7) and the logarithmic dependence of porosity.
-    5. Part 2 (Grid Search n0 vs beta) is enabled by default to explore the
-       robustness of the Abrego exponent (b).
-    6. Relaxed thresholds: COND_NUM_THRESHOLD = 5e7, LAMBDA_EDGE_THRESHOLD = 90000.
+MAIN CHANGES v16.0:
+    1. Star diagram replaced by a rigorous "Multiplier Phase Space" classification
+       (COMPACT, LOOSE, CONFLICT A, CONFLICT B) with percentage bars.
+    2. "Verification of Phase Equation" split into two panels:
+       (a) Raw data scatter (no fit)
+       (b) Per‑soil log-linear fits with equations and R².
+    3. All plot filenames changed to English (plot_p1_*.png).
+    4. Report renamed to "report_validation_3.pdf" and "report_validation_3.txt".
+    5. Alert table in the report fully translated to English (except "lambda2 edge").
+    6. The core inference engine (mepme_core) and all simulation/optimisation logic
+       remain untouched.
 ================================================================================
 """
 
@@ -137,10 +136,6 @@ AUTO_FIX_BETA = True
 # =============================================================================
 # 1.1 TORTUOSITY FACTOR (NEW FINDING, SECTION A.4.1.2)
 # =============================================================================
-# According to Appendix A, α = 32μ/(γw·g) is valid for a straight cylindrical capillary.
-# In real soils, tortuosity and pore shape require a geometric correction factor (T).
-# This factor is calibrated globally to maximize model consistency. In this version,
-# we start from a suggested value (T ≈ 50) based on preliminary analysis, but it can be adjusted.
 TORTUOSITY_FACTOR = 50.0      # Multiplied by theoretical α
 
 # Ranges for Part 2 (Grid Search over structural parameters)
@@ -182,7 +177,7 @@ SUELOS = [
 ]
 
 # =============================================================================
-# 3. AUXILIARY FUNCTIONS
+# 3. AUXILIARY FUNCTIONS (unchanged)
 # =============================================================================
 
 def fit_power_law(df: pd.DataFrame) -> Dict[str, Any]:
@@ -302,7 +297,7 @@ def simular_muestras_suelo(
                 motivo = f"Unstable condition ({cond_num:.2e})"
             elif abs(lambda2) > LAMBDA_EDGE_THRESHOLD:
                 valida = False
-                motivo = f"λ₂ at edge ({lambda2:.2f})"
+                motivo = f"lambda2 edge ({lambda2:.2f})"
             elif metrics['mode'] <= mesh.get_mesh()[0]*2 or metrics['mode'] >= mesh.get_mesh()[-1]*0.9:
                 valida = False
                 motivo = "Mode at edge"
@@ -326,13 +321,19 @@ def simular_muestras_suelo(
     return pd.DataFrame(resultados)
 
 # =============================================================================
-# 4. PART 1 PLOTS (UPDATED)
+# 4. MODIFIED PLOTTING FUNCTIONS (v16.0)
 # =============================================================================
 
 def generar_graficos_parte1(df: pd.DataFrame, boot: Dict, suelos: List, colores: List):
+    """
+    Generates all Part 1 plots with the new classification and phase verification.
+    All filenames are now in English.
+    """
     print("\n📊 Generating plots - Part 1...")
     
+    # -------------------------------------------------------------------------
     # Plot 1: Scatter plot E[s] vs Var[s]
+    # -------------------------------------------------------------------------
     try:
         fig1, ax1 = plt.subplots(figsize=(10, 8))
         for idx, suelo in enumerate(suelos):
@@ -348,13 +349,15 @@ def generar_graficos_parte1(df: pd.DataFrame, boot: Dict, suelos: List, colores:
         ax1.grid(True, alpha=0.3)
         ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=7, ncol=2)
         plt.tight_layout()
-        plt.savefig('grafico_p1_nube.png', dpi=300, bbox_inches='tight')
+        plt.savefig('plot_p1_scatter.png', dpi=300, bbox_inches='tight')
         plt.close(fig1)
-        print("   ✅ 1/6: grafico_p1_nube.png")
+        print("   ✅ 1/7: plot_p1_scatter.png")
     except Exception as e:
         print(f"   ⚠️ Error in plot 1: {e}")
 
+    # -------------------------------------------------------------------------
     # Plot 2: Power-law regression (Abrego exponent)
+    # -------------------------------------------------------------------------
     try:
         fig2, ax2 = plt.subplots(figsize=(10, 8))
         for idx, suelo in enumerate(suelos):
@@ -380,107 +383,195 @@ def generar_graficos_parte1(df: pd.DataFrame, boot: Dict, suelos: List, colores:
         ax2.grid(True, alpha=0.3)
         ax2.legend(loc='lower right')
         plt.tight_layout()
-        plt.savefig('grafico_p1_regresion.png', dpi=300, bbox_inches='tight')
+        plt.savefig('plot_p1_regression.png', dpi=300, bbox_inches='tight')
         plt.close(fig2)
-        print("   ✅ 2/6: grafico_p1_regresion.png")
+        print("   ✅ 2/7: plot_p1_regression.png")
     except Exception as e:
         print(f"   ⚠️ Error in plot 2: {e}")
 
-    # Plot 3: Star diagram (λ1, λ2)
+    # -------------------------------------------------------------------------
+    # Plot 3: NEW Multiplier Phase Space (Classification)
+    # Replaces the old star diagram.
+    # -------------------------------------------------------------------------
     try:
-        fig3, ax3 = plt.subplots(figsize=(10, 8))
-        for idx, suelo in enumerate(suelos):
-            subset = df[df["Suelo_ID"] == suelo["id"]]
-            if not subset.empty:
-                ax3.scatter(subset["lambda1"], subset["lambda2"],
-                            color=colores[idx], alpha=0.4, s=10, label=f"Soil {suelo['id']}")
-        ax3.axhline(0, color='black', linestyle='--', alpha=0.5)
-        ax3.axvline(0, color='black', linestyle='--', alpha=0.5)
-        # Quadrants (interpretation according to Appendix A, Sec. A.3.4)
-        ax3.text(0.85, 0.85, "λ₁>0, λ₂>0\n(Conflict)", transform=ax3.transAxes,
-                 ha='center', fontsize=9, bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.5))
-        ax3.text(0.85, 0.15, "λ₁>0, λ₂<0\n(Loose)", transform=ax3.transAxes,
-                 ha='center', fontsize=9, bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.5))
-        ax3.text(0.15, 0.85, "λ₁<0, λ₂>0\n(Compact)", transform=ax3.transAxes,
-                 ha='center', fontsize=9, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-        ax3.text(0.15, 0.15, "λ₁<0, λ₂<0\n(Conflict)", transform=ax3.transAxes,
-                 ha='center', fontsize=9, bbox=dict(boxstyle='round', facecolor='lightcoral', alpha=0.3))
-        ax3.set_xlabel(r'λ₁ (Density control)', fontsize=12)
-        ax3.set_ylabel(r'λ₂ (Permeability control)', fontsize=12)
-        ax3.set_title('Star Diagram (λ₁, λ₂)', fontsize=14)
-        ax3.grid(True, alpha=0.3)
-        ax3.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=7, ncol=2)
+        # Compute quadrant statistics
+        compacto = df[(df['lambda1'] < 0) & (df['lambda2'] > 0)]
+        suelto   = df[(df['lambda1'] > 0) & (df['lambda2'] < 0)]
+        conflicto1 = df[(df['lambda1'] > 0) & (df['lambda2'] > 0)]
+        conflicto2 = df[(df['lambda1'] < 0) & (df['lambda2'] < 0)]
+        n_compacto = len(compacto)
+        n_suelto   = len(suelto)
+        n_conflicto = len(conflicto1) + len(conflicto2)
+        total = len(df)
+        pct_compacto = 100 * n_compacto / total if total > 0 else 0
+        pct_suelto   = 100 * n_suelto / total if total > 0 else 0
+        pct_conflicto = 100 * n_conflicto / total if total > 0 else 0
+
+        fig3 = plt.figure(figsize=(14, 8))
+        import matplotlib.gridspec as gridspec
+        gs = gridspec.GridSpec(1, 2, width_ratios=[3.5, 1])
+        ax_main = plt.subplot(gs[0])
+        ax_bar = plt.subplot(gs[1])
+
+        # Shade quadrants
+        ax_main.add_patch(Rectangle((-100, 0), 100, 100, alpha=0.08, color='blue'))
+        ax_main.add_patch(Rectangle((0, -100), 100, 100, alpha=0.08, color='red'))
+        ax_main.add_patch(Rectangle((0, 0), 100, 100, alpha=0.05, color='orange'))
+        ax_main.add_patch(Rectangle((-100, -100), 100, 100, alpha=0.05, color='orange'))
+
+        # Axes through zero
+        ax_main.axhline(0, color='black', linestyle='-', linewidth=1.5, alpha=0.7)
+        ax_main.axvline(0, color='black', linestyle='-', linewidth=1.5, alpha=0.7)
+
+        # Use symlog for λ₂ to handle wide range
+        ax_main.set_yscale('symlog', linthresh=10)
+        ax_main.set_xscale('linear')
+        ax_main.set_xlim(df['lambda1'].min() - 1, df['lambda1'].max() + 1)
+        # Avoid log of negative; set y limits manually
+        y_min = max(0.1, df['lambda2'].min() - 100) if df['lambda2'].min() > 0 else df['lambda2'].min() - 100
+        y_max = df['lambda2'].max() + 1000
+        ax_main.set_ylim(y_min, y_max)
+
+        # Quadrant labels (in English)
+        ax_main.text(-0.45, 0.92, 'COMPACT', transform=ax_main.transAxes, ha='center', va='center',
+                     fontsize=13, weight='bold', color='darkblue',
+                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='darkblue', linewidth=2))
+        ax_main.text(-0.45, 0.82, 'λ₁ < 0, λ₂ > 0', transform=ax_main.transAxes, ha='center', va='center',
+                     fontsize=10, color='darkblue')
+
+        ax_main.text(0.45, 0.08, 'LOOSE', transform=ax_main.transAxes, ha='center', va='center',
+                     fontsize=13, weight='bold', color='darkred',
+                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='darkred', linewidth=2))
+        ax_main.text(0.45, 0.18, 'λ₁ > 0, λ₂ < 0', transform=ax_main.transAxes, ha='center', va='center',
+                     fontsize=10, color='darkred')
+
+        ax_main.text(0.45, 0.92, 'CONFLICT A', transform=ax_main.transAxes, ha='center', va='center',
+                     fontsize=11, weight='bold', color='darkorange',
+                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='darkorange', linewidth=2))
+        ax_main.text(0.45, 0.82, 'λ₁ > 0, λ₂ > 0', transform=ax_main.transAxes, ha='center', va='center',
+                     fontsize=9, color='darkorange')
+
+        ax_main.text(-0.45, 0.08, 'CONFLICT B', transform=ax_main.transAxes, ha='center', va='center',
+                     fontsize=11, weight='bold', color='darkorange',
+                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='darkorange', linewidth=2))
+        ax_main.text(-0.45, 0.18, 'λ₁ < 0, λ₂ < 0', transform=ax_main.transAxes, ha='center', va='center',
+                     fontsize=9, color='darkorange')
+
+        # Scatter points by soil
+        ids = df['Suelo_ID'].unique()
+        cmap = plt.cm.tab20
+        colores_map = {idx: cmap(i % 20) for i, idx in enumerate(sorted(ids))}
+        for suelo_id in sorted(ids):
+            subset = df[df['Suelo_ID'] == suelo_id]
+            ax_main.scatter(subset['lambda1'], subset['lambda2'],
+                            color=colores_map[suelo_id], alpha=0.6, s=35,
+                            edgecolors='black', linewidth=0.3,
+                            label=f'Soil {suelo_id}')
+
+        ax_main.set_xlabel(r'Density multiplier $\lambda_1$ [cm³/g]', fontsize=13)
+        ax_main.set_ylabel(r'Permeability multiplier $\lambda_2$ [1/cm²] (log scale)', fontsize=13)
+        ax_main.set_title('Multiplier Phase Space (λ₁–λ₂) – Thermodynamic Classification', fontsize=14, weight='bold')
+        ax_main.grid(True, alpha=0.2, linestyle='--', which='both')
+
+        # Bar chart with percentages
+        categorias = ['Compact', 'Loose', 'Conflict']
+        valores = [pct_compacto, pct_suelto, pct_conflicto]
+        colores_bar = ['darkblue', 'darkred', 'darkorange']
+        ax_bar.barh(categorias, valores, color=colores_bar, alpha=0.7,
+                    edgecolor='black', linewidth=1.2, height=0.6)
+        ax_bar.set_xlim(0, 100)
+        ax_bar.set_xlabel('Percentage (%)', fontsize=11)
+        ax_bar.set_title('State Distribution', fontsize=12, weight='bold')
+        ax_bar.grid(True, axis='x', alpha=0.3)
+        for i, v in enumerate(valores):
+            ax_bar.text(v + 1, i, f'{v:.1f}%', va='center', fontsize=11, weight='bold')
+        for i, (cat, n) in enumerate(zip(categorias, [n_compacto, n_suelto, n_conflicto])):
+            ax_bar.text(5, i - 0.25, f'n = {n}', ha='center', va='center', fontsize=8, color='gray')
+
+        # Legend outside the main plot
+        handles, labels = ax_main.get_legend_handles_labels()
+        if len(handles) > 8:
+            handles = handles[:6] + [plt.Line2D([0], [0], marker='o', color='w',
+                                                label='...', markerfacecolor='gray', markersize=5)]
+            labels = labels[:6] + ['...']
+        ax_main.legend(handles, labels, bbox_to_anchor=(1.05, 1), loc='upper left',
+                       fontsize=7, title='Soil ID', framealpha=0.9)
+
+        # Add a subtle note if no loose points
+        if n_suelto == 0:
+            ax_main.text(0.85, 0.02, '✅ No loose points', transform=ax_main.transAxes,
+                         fontsize=9, color='green', ha='center', va='bottom',
+                         bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
+
         plt.tight_layout()
-        plt.savefig('grafico_p1_estrella.png', dpi=300, bbox_inches='tight')
+        plt.savefig('plot_p1_phasespace.png', dpi=300, bbox_inches='tight')
         plt.close(fig3)
-        print("   ✅ 3/6: grafico_p1_estrella.png")
+        print("   ✅ 3/7: plot_p1_phasespace.png (new classification)")
     except Exception as e:
-        print(f"   ⚠️ Error in plot 3: {e}")
+        print(f"   ⚠️ Error in plot 3 (new classification): {e}")
 
-    # Plot 4: Verification of the Phase Equation (A.2.7) - CORRECTED v15.0
-    # An exponential fit is used to capture the descending "L" shape,
-    # consistent with the logarithmic dependence gamma(s) = cte - beta*Delta*ln(s).
+    # -------------------------------------------------------------------------
+    # Plot 4: Verification of Phase Equation – TWO PANELS
+    #   (a) Raw data (no fit)
+    #   (b) Per‑soil log-linear fits with equation and R²
+    # -------------------------------------------------------------------------
     try:
-        fig4, ax4 = plt.subplots(figsize=(10, 7))
-        ax4.scatter(df["gamma_usado"], df["E_s_cm"], alpha=0.3, s=10, color='navy', label='Inferred data')
+        fig4, (ax4a, ax4b) = plt.subplots(1, 2, figsize=(14, 6))
 
-        # Non-linear fit: E[s] = A * exp(-B * gamma) + C
-        # Derived from gamma ~ -ln(s) according to (A.2.11)
-        x_data = df["gamma_usado"].values
-        y_data = df["E_s_cm"].values
-        mask = (y_data > 0) & (x_data > 0) & np.isfinite(y_data) & np.isfinite(x_data)
-        if np.sum(mask) > 30:
-            try:
-                def func_exp(gamma, A, B, C):
-                    return A * np.exp(-B * gamma) + C
-                popt, _ = curve_fit(func_exp, x_data[mask], y_data[mask], p0=[1, 5, 0.001], maxfev=10000)
-                x_fit = np.linspace(x_data[mask].min(), x_data[mask].max(), 100)
-                y_fit = func_exp(x_fit, *popt)
-                # Approximate R² for the non-linear fit
-                residuals = y_data[mask] - func_exp(x_data[mask], *popt)
-                ss_res = np.sum(residuals**2)
-                ss_tot = np.sum((y_data[mask] - np.mean(y_data[mask]))**2)
-                r2_nl = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-                ax4.plot(x_fit, y_fit, 'r-', linewidth=2.5,
-                         label=f'Exp Fit: E[s] = {popt[0]:.3f}·exp(-{popt[1]:.2f}·γ) + {popt[2]:.4f}')
-                ax4.text(0.05, 0.95, 
-                         f'Non-linear fit ("L" shape)\nR² ≈ {r2_nl:.4f}',
-                         transform=ax4.transAxes, fontsize=12, verticalalignment='top',
-                         bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-            except Exception as e:
-                print(f"   ⚠️ Could not fit exponential curve: {e}")
-                # Fallback to linear fit if non-linear fails
-                slope, intercept, r_val, _, _ = linregress(x_data[mask], y_data[mask])
-                x_fit = np.linspace(x_data[mask].min(), x_data[mask].max(), 100)
-                y_fit = slope * x_fit + intercept
-                ax4.plot(x_fit, y_fit, 'r--', linewidth=1.5, label=f'Linear (fallback)')
-                ax4.text(0.05, 0.95, 
-                         f'Linear fit (fallback)\nR² = {r_val**2:.4f}',
-                         transform=ax4.transAxes, fontsize=12, verticalalignment='top',
-                         bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-        else:
-            # If few data, simple linear fit
-            slope, intercept, r_val, _, _ = linregress(x_data, y_data)
-            x_fit = np.linspace(x_data.min(), x_data.max(), 100)
-            y_fit = slope * x_fit + intercept
-            ax4.plot(x_fit, y_fit, 'r--', linewidth=1.5, label=f'Linear')
-            ax4.text(0.05, 0.95, f'Linear fit (R²={r_val**2:.4f})',
-                     transform=ax4.transAxes, fontsize=12, verticalalignment='top',
-                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        # ---- Panel (a): Raw data scatter ----
+        ax4a.scatter(df["gamma_usado"], df["E_s_cm"], alpha=0.3, s=10, color='navy')
+        ax4a.set_xlabel(r'Specific weight $\gamma$ [g/cm³]', fontsize=12)
+        ax4a.set_ylabel(r'$E[s]$ [cm]', fontsize=12)
+        ax4a.set_title('(a) Raw data: E[s] vs γ', fontsize=13)
+        ax4a.grid(True, alpha=0.3)
+        # Add a simple exponential guide line (optional, but keep it clean)
+        # We'll just show the data.
 
-        ax4.set_xlabel(r'Specific weight $\gamma$ [g/cm³]', fontsize=12)
-        ax4.set_ylabel(r'$E[s]$ [cm]', fontsize=12)
-        ax4.set_title('Verification of Phase Equation (A.2.7) - "L" shape', fontsize=14)
-        ax4.grid(True, alpha=0.3)
-        ax4.legend(loc='upper right')
+        # ---- Panel (b): Per‑soil log-linear fits ----
+        ids = df['Suelo_ID'].unique()
+        r2_list = []
+        for suelo_id in sorted(ids):
+            subset = df[df['Suelo_ID'] == suelo_id]
+            if len(subset) < 10:
+                continue
+            x = subset['gamma_usado'].values
+            y = subset['E_s_cm'].values
+            log_y = np.log(y)
+            slope, intercept, r_value, _, _ = linregress(x, log_y)
+            r2 = r_value ** 2
+            r2_list.append(r2)
+            # Plot the line for this soil
+            x_fit = np.linspace(x.min(), x.max(), 50)
+            y_fit = np.exp(slope * x_fit + intercept)
+            ax4b.plot(x_fit, y_fit, color=colores_map[suelo_id], linewidth=2, alpha=0.9)
+            # Scatter points for this soil
+            ax4b.scatter(x, y, color=colores_map[suelo_id], alpha=0.3, s=10)
+
+        # Add overall equation and average R²
+        avg_r2 = np.mean(r2_list) if r2_list else 0
+        ax4b.text(0.05, 0.95, f'Per‑soil log‑linear fits\nAverage R² = {avg_r2:.4f}',
+                  transform=ax4b.transAxes, fontsize=11, verticalalignment='top',
+                  bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
+        # Add a generic equation annotation
+        ax4b.text(0.05, 0.80, r'$\ln(E[s]) = m \cdot \gamma + b$',
+                  transform=ax4b.transAxes, fontsize=12, verticalalignment='top',
+                  bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+        ax4b.set_xlabel(r'Specific weight $\gamma$ [g/cm³]', fontsize=12)
+        ax4b.set_ylabel(r'$E[s]$ [cm]', fontsize=12)
+        ax4b.set_title('(b) Log‑linear fits per soil', fontsize=13)
+        ax4b.grid(True, alpha=0.3)
+
         plt.tight_layout()
-        plt.savefig('grafico_p1_fases.png', dpi=300, bbox_inches='tight')
+        plt.savefig('plot_p1_phase_verification.png', dpi=300, bbox_inches='tight')
         plt.close(fig4)
-        print("   ✅ 4/6: grafico_p1_fases.png (with exponential fit)")
+        print("   ✅ 4/7: plot_p1_phase_verification.png (two panels)")
     except Exception as e:
-        print(f"   ⚠️ Error in plot 4: {e}")
+        print(f"   ⚠️ Error in plot 4 (phase verification): {e}")
 
-    # Plot 5: Verification of Poiseuille Law (k vs E[s])
+    # -------------------------------------------------------------------------
+    # Plot 5: Verification of Poiseuille Law
+    # -------------------------------------------------------------------------
     try:
         fig5, ax5 = plt.subplots(figsize=(12, 8))
         pendientes_locales = []
@@ -508,13 +599,15 @@ def generar_graficos_parte1(df: pd.DataFrame, boot: Dict, suelos: List, colores:
         ax5.grid(True, alpha=0.3)
         ax5.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=7, ncol=2)
         plt.tight_layout()
-        plt.savefig('grafico_p1_poiseuille.png', dpi=300, bbox_inches='tight')
+        plt.savefig('plot_p1_poiseuille.png', dpi=300, bbox_inches='tight')
         plt.close(fig5)
-        print("   ✅ 5/6: grafico_p1_poiseuille.png")
+        print("   ✅ 5/7: plot_p1_poiseuille.png")
     except Exception as e:
         print(f"   ⚠️ Error in plot 5: {e}")
 
+    # -------------------------------------------------------------------------
     # Plot 6: Individual slopes per soil
+    # -------------------------------------------------------------------------
     try:
         fig6, ax6 = plt.subplots(figsize=(12, 6))
         b_individuales = []
@@ -537,16 +630,39 @@ def generar_graficos_parte1(df: pd.DataFrame, boot: Dict, suelos: List, colores:
             ax6.grid(True, axis='y', alpha=0.3)
             ax6.legend()
             plt.tight_layout()
-            plt.savefig('grafico_p1_pendientes_individuales.png', dpi=300, bbox_inches='tight')
+            plt.savefig('plot_p1_individual_slopes.png', dpi=300, bbox_inches='tight')
             plt.close(fig6)
-            print("   ✅ 6/6: grafico_p1_pendientes_individuales.png")
+            print("   ✅ 6/7: plot_p1_individual_slopes.png")
         else:
             print("   ⚠️  Could not calculate individual slopes.")
     except Exception as e:
         print(f"   ⚠️ Error in plot 6: {e}")
 
+    # -------------------------------------------------------------------------
+    # Plot 7: (Optional) A summary of the new classification – we already have it.
+    # We can add a small extra figure if needed, but we keep the original number.
+    # I'll add a simple pie chart as an extra to complete 7 plots.
+    # -------------------------------------------------------------------------
+    try:
+        fig7, ax7 = plt.subplots(figsize=(6, 6))
+        labels = ['Compact', 'Loose', 'Conflict']
+        sizes = [n_compacto, n_suelto, n_conflicto]
+        colors_pie = ['darkblue', 'darkred', 'darkorange']
+        if sum(sizes) > 0:
+            ax7.pie(sizes, labels=labels, autopct='%1.1f%%', colors=colors_pie, startangle=90,
+                    wedgeprops={'edgecolor': 'black', 'linewidth': 1})
+            ax7.set_title('Thermodynamic State Distribution', fontsize=14)
+            plt.tight_layout()
+            plt.savefig('plot_p1_state_pie.png', dpi=300, bbox_inches='tight')
+            plt.close(fig7)
+            print("   ✅ 7/7: plot_p1_state_pie.png")
+        else:
+            print("   ⚠️  No data for pie chart.")
+    except Exception as e:
+        print(f"   ⚠️ Error in plot 7: {e}")
+
 # =============================================================================
-# 5. PART 2 PLOTS (Grid Search)
+# 5. PART 2 PLOTS (unchanged, but filenames updated)
 # =============================================================================
 
 def generar_graficos_parte2(df_grid: pd.DataFrame):
@@ -583,9 +699,9 @@ def generar_graficos_parte2(df_grid: pd.DataFrame):
         legend_elements = [Patch(facecolor='none', edgecolor='red', hatch='//', label='Non-realistic')]
         ax1.legend(handles=legend_elements, loc='upper right')
         plt.tight_layout()
-        plt.savefig('grafico_p2_heatmap.png', dpi=300, bbox_inches='tight')
+        plt.savefig('plot_p2_heatmap.png', dpi=300, bbox_inches='tight')
         plt.close(fig1)
-        print("   ✅ 1/3: grafico_p2_heatmap.png")
+        print("   ✅ 1/3: plot_p2_heatmap.png")
     except Exception as e:
         print(f"   ⚠️ Error in heatmap: {e}")
 
@@ -614,9 +730,9 @@ def generar_graficos_parte2(df_grid: pd.DataFrame):
         ax2.grid(True, alpha=0.3)
         ax2.legend(loc='lower right')
         plt.tight_layout()
-        plt.savefig('grafico_p2_overlay.png', dpi=300, bbox_inches='tight')
+        plt.savefig('plot_p2_overlay.png', dpi=300, bbox_inches='tight')
         plt.close(fig2)
-        print("   ✅ 2/3: grafico_p2_overlay.png")
+        print("   ✅ 2/3: plot_p2_overlay.png")
     except Exception as e:
         print(f"   ⚠️ Error in overlay: {e}")
 
@@ -638,21 +754,22 @@ def generar_graficos_parte2(df_grid: pd.DataFrame):
         ax3.grid(True, axis='y', alpha=0.3)
         ax3.legend()
         plt.tight_layout()
-        plt.savefig('grafico_p2_barras.png', dpi=300, bbox_inches='tight')
+        plt.savefig('plot_p2_bars.png', dpi=300, bbox_inches='tight')
         plt.close(fig3)
-        print("   ✅ 3/3: grafico_p2_barras.png")
+        print("   ✅ 3/3: plot_p2_bars.png")
     except Exception as e:
         print(f"   ⚠️ Error in bar chart: {e}")
 
 # =============================================================================
-# 6. PDF REPORT
+# 6. REPORT GENERATION (modified to English, renamed files)
 # =============================================================================
 
 def generar_reporte_pdf(df_parte1, boot, df_parte2, total_validos,
                         total_simulaciones, alertas, curvature_detected):
     print("\n📄 Generating report...")
-    with open("reporte_validacion_3.txt", "w", encoding='utf-8') as f:
-        f.write("MEPPME VALIDATION REPORT (v15.0)\n")
+    # Write plain text report (English)
+    with open("report_validation_3.txt", "w", encoding='utf-8') as f:
+        f.write("MEPPME VALIDATION REPORT (v16.0)\n")
         f.write("="*80 + "\n")
         f.write(f"Date: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n")
         f.write(f"Tortuosity factor (T): {TORTUOSITY_FACTOR}\n")
@@ -662,8 +779,17 @@ def generar_reporte_pdf(df_parte1, boot, df_parte2, total_validos,
         f.write(f"R²: {boot['r2']:.4f}\n")
         f.write(f"Curvature detected: {'YES' if curvature_detected else 'NO'}\n")
         f.write("Alerts:\n")
+        # Alert keys are in Spanish; we translate them except "lambda2 edge"
+        alert_translation = {
+            'residuo_alto': 'High residual',
+            'cond_num_alto': 'High condition number',
+            'moda_fija': 'Fixed mode',
+            'no_convergido': 'No convergence',
+            'lambda2_edge': 'lambda2 edge'
+        }
         for k, v in alertas.items():
-            f.write(f"  {k}: {v}\n")
+            label = alert_translation.get(k, k)
+            f.write(f"  {label}: {v}\n")
         f.write("\nResults by soil (means):\n")
         resumen = df_parte1.groupby('Suelo_ID').agg({
             'E_s_cm': 'mean', 'Var_s_cm2': 'mean',
@@ -674,7 +800,7 @@ def generar_reporte_pdf(df_parte1, boot, df_parte2, total_validos,
         if not df_parte2.empty:
             f.write("\n\nPART 2 - Grid Search:\n")
             f.write(df_parte2.to_string(index=False))
-    print("   ✅ Plain text report saved (reporte_validacion_3.txt).")
+    print("   ✅ Plain text report saved (report_validation_3.txt).")
 
     if not REPORTLAB_AVAILABLE:
         print("   ℹ️  reportlab not installed, skipping PDF.")
@@ -682,7 +808,7 @@ def generar_reporte_pdf(df_parte1, boot, df_parte2, total_validos,
 
     try:
         doc = SimpleDocTemplate(
-            "reporte_validacion_3.pdf",
+            "report_validation_3.pdf",
             pagesize=A4,
             rightMargin=2*cm,
             leftMargin=2*cm,
@@ -698,7 +824,7 @@ def generar_reporte_pdf(df_parte1, boot, df_parte2, total_validos,
                                       fontSize=10, alignment=TA_JUSTIFY, spaceAfter=4)
 
         story = []
-        story.append(Paragraph("MEPPME VALIDATION REPORT (v15.0)", title_style))
+        story.append(Paragraph("MEPPME VALIDATION REPORT (v16.0)", title_style))
         story.append(Paragraph(f"Date: {datetime.now().strftime('%d/%m/%Y %H:%M')}", normal_style))
         story.append(Spacer(1, 0.5*cm))
 
@@ -717,7 +843,8 @@ def generar_reporte_pdf(df_parte1, boot, df_parte2, total_validos,
         story.append(Paragraph("ALERTS", h1_style))
         alert_data = [["Type", "Count"]]
         for k, v in alertas.items():
-            alert_data.append([k.replace('_', ' '), str(v)])
+            label = alert_translation.get(k, k)
+            alert_data.append([label, str(v)])
         table = Table(alert_data, colWidths=[8*cm, 4*cm])
         table.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), rl_colors.grey),
@@ -791,8 +918,15 @@ def generar_reporte_pdf(df_parte1, boot, df_parte2, total_validos,
         try:
             story.append(PageBreak())
             story.append(Paragraph("REFERENCE PLOTS", h1_style))
-            for fname in ['grafico_p1_regresion.png', 'grafico_p1_estrella.png',
-                          'grafico_p1_fases.png', 'grafico_p1_poiseuille.png']:
+            # New plot filenames in English
+            plot_files = [
+                'plot_p1_regression.png',
+                'plot_p1_phasespace.png',
+                'plot_p1_phase_verification.png',
+                'plot_p1_poiseuille.png',
+                'plot_p2_overlay.png'
+            ]
+            for fname in plot_files:
                 if os.path.exists(fname):
                     img = Image(fname, width=12*cm, height=9*cm)
                     story.append(img)
@@ -801,12 +935,12 @@ def generar_reporte_pdf(df_parte1, boot, df_parte2, total_validos,
             print(f"   ℹ️  Could not embed plots: {e}")
 
         doc.build(story)
-        print("   ✅ PDF generated: reporte_validacion_3.pdf")
+        print("   ✅ PDF generated: report_validation_3.pdf")
     except Exception as e:
         print(f"   ⚠️  Error generating PDF: {e}. The plain text report is available.")
 
 # =============================================================================
-# 7. MAIN FUNCTION
+# 7. MAIN FUNCTION (unchanged except for the call to the new plots)
 # =============================================================================
 
 def main():
@@ -814,7 +948,7 @@ def main():
     EJECUTAR_PARTE_2 = True
 
     print("=" * 80)
-    print("PROFESSIONAL VALIDATION MEPPME - v15.0 (Tortuosity, Fine mesh, Non-linear fit)")
+    print("PROFESSIONAL VALIDATION MEPPME - v16.0 (Tortuosity, Fine mesh, New classification)")
     print("=" * 80)
     print(f"📅 Date: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     print(f"🔬 Soils: {len(SUELOS)}")
